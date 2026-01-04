@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <title>Login - CareerPro AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: #0f172a;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            padding: 3rem 2rem;
+            border-radius: 24px;
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .brand-icon {
+            background: #3b82f6;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 16px;
+            margin: 0 auto 1.5rem;
+            font-size: 30px;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-card">
+        <div class="brand-icon">🚀</div>
+        <h2 class="fw-bold mb-3">Welcome Back</h2>
+
+        <!-- Simplified message display -->
+        <p class="text-secondary mb-4"
+            th:text="${infoMsg != null ? infoMsg : 'Sign in to access elite search and career tools.'}"></p>
+
+        <div id="g_id_onload" data-client_id="299145238620-gukjrcl6i9v75arht7vevusoulrif280.apps.googleusercontent.com"
+            data-callback="handleCredentialResponse" data-auto_prompt="false">
+        </div>
+        <div class="g_id_signin d-flex justify-content-center shadow-lg" data-type="standard"></div>
+
+        <div class="mt-5 pt-4 border-top border-secondary">
+            <a href="/" class="text-secondary text-decoration-none small"><i class="fas fa-arrow-left me-1"></i> Back to
+                Dashboard</a>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
+    <script>
+        function handleCredentialResponse(response) {
+            fetch('/api/auth/google', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: response.credential })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        localStorage.setItem('jwt', data.jwt);
+                        // Reload to home
+                        window.location.href = "/";
+                    } else {
+                        alert("Authentication Error: " + data.error);
+                    }
+                })
+                .catch(err => {
+                    console.error("Login Error:", err);
+                    alert("Connection error during login. Please try again.");
+                });
+        }
+    </script>
+</body>
+
+</html>

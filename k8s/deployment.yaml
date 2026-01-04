@@ -1,0 +1,89 @@
+# =========================
+# SECRET
+# =========================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: career-agent-secrets
+type: Opaque
+stringData:
+  GEMINI_API_KEY: Oep76f2tI74BxYkIHjzv1mz9VqM5Ohg 
+  RAPID_API_KEY: 74c46f1b4msh09bc4f3bb5a23bfp143dfcjsn097deb6e9d01 ./mvnw spring-boot:run
+
+---
+# =========================
+# DEPLOYMENT
+# =========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: career-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: career-agent
+  template:
+    metadata:
+      labels:
+        app: career-agent
+    spec:
+      containers:
+        - name: career-agent
+          image: career-agent:latest
+          imagePullPolicy: Never   # OK ONLY for local Minikube / Docker Desktop
+
+          ports:
+            - containerPort: 8080
+
+          env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: career-agent-secrets
+                  key: GEMINI_API_KEY
+
+            - name: RAPID_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: career-agent-secrets
+                  key: RAPID_API_KEY
+
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+---
+# =========================
+# SERVICE
+# =========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: career-agent-service
+spec:
+  type: NodePort
+  selector:
+    app: career-agent
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30007
