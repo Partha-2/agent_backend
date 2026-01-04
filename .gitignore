@@ -8,3 +8,4 @@ help.md
 .mvn/
 mvnw
 mvnw.cmd
+.env
