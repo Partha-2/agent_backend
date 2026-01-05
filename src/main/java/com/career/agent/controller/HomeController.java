@@ -159,7 +159,11 @@ public class HomeController {
             }
             if (!resumeText.isEmpty())
                 jobs.sort((a, b) -> Integer.compare((int) b.get("score"), (int) a.get("score")));
-            model.addAttribute("jobs", jobs);
+            if (jobs.isEmpty()) {
+                generateMockJobs(model, role, loc, resumeText, date);
+            } else {
+                model.addAttribute("jobs", jobs);
+            }
         }
     }
 
