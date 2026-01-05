@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CareerPro AI - Elite Job Scout</title>
+    <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3076/3076134.png" type="image/x-icon">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -301,8 +302,16 @@
                     </select>
                 </div>
 
-                <div class="col-md-2 col-6 d-grid align-items-end">
-                    <button type="submit" class="btn btn-primary py-2 fw-bold rounded-xl">Search</button>
+                <div class="col-md-3">
+                    <select class="form-select h-100 border-0 bg-transparent" name="datePosted">
+                        <option value="all" th:selected="${datePosted == 'all'}">Any Date</option>
+                        <option value="month" th:selected="${datePosted == 'month'}">Last Month</option>
+                        <option value="week" th:selected="${datePosted == 'week'}">Last Week</option>
+                        <option value="today" th:selected="${datePosted == 'today'}">Today</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100 h-100 fw-bold">Search</button>
                 </div>
 
                 <div class="col-12 mt-4">
@@ -472,16 +481,28 @@
                 if (res.ok) {
                     btn.innerHTML = '<i class="fas fa-check"></i>';
                     btn.classList.replace('btn-outline-light', 'btn-success');
-                } else alert("Log in to save jobs");
-            });
+                    // Optional: Auto-refresh saved list if visible
+                    // loadSavedJobs(); 
+                } else {
+                    alert("Please Login to Save Jobs!");
+                    window.location.href = "/login";
+                }
+            }).catch(e => alert("Error saving job: " + e));
         }
 
         function loadSavedJobs() {
             const body = document.getElementById("savedJobsBody");
             body.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div></div>';
             fetch('/api/jobs/saved')
-                .then(res => res.json())
+                .then(res => {
+                    if (res.status === 401) {
+                        body.innerHTML = '<div class="text-center py-5 text-secondary"><i class="fas fa-lock fa-3x mb-3"></i><p>Login to view saved jobs.</p></div>';
+                        return null;
+                    }
+                    return res.json();
+                })
                 .then(data => {
+                    if (!data) return;
                     if (data.length === 0) {
                         body.innerHTML = '<div class="text-center py-5 text-secondary"><i class="fas fa-box-open fa-3x mb-3"></i><p>No saved jobs yet.</p></div>';
                         return;
@@ -499,6 +520,10 @@
                             </div>`;
                         body.appendChild(div);
                     });
+                })
+                .catch(err => {
+                    console.error("Error loading jobs:", err);
+                    body.innerHTML = '<div class="text-center py-5 text-danger"><i class="fas fa-exclamation-circle fa-2x mb-2"></i><p>Could not load jobs.</p></div>';
                 });
         }
 

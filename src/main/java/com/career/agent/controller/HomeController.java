@@ -62,15 +62,12 @@ public class HomeController {
         return "redirect:/login?msg=Logged Out";
     }
 
-    @RequestMapping(value = "/search", method = { RequestMethod.GET, RequestMethod.POST })
+    @GetMapping("/search")
     public String search(@RequestParam(required = false) String role,
             @RequestParam(required = false) String location,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(required = false) String experience,
-            @RequestParam(required = false, defaultValue = "all") String datePosted,
-            @RequestParam(required = false) MultipartFile resume,
-            Principal principal,
-            Model model) {
+            @RequestParam(required = false) String datePosted,
+            @RequestParam("resume") MultipartFile resumeFile,
+            Model model, Principal principal) {
 
         try {
             addDefaultAttributes(model, principal);
@@ -79,18 +76,18 @@ public class HomeController {
 
             model.addAttribute("role", role);
             model.addAttribute("location", location);
-            model.addAttribute("currentPage", page);
-            model.addAttribute("experience", (experience != null) ? experience : "all");
+            model.addAttribute("datePosted", (datePosted != null) ? datePosted : "all");
 
             if (role == null || role.isBlank())
                 return "dashboard";
 
             String resumeText = "";
-            if (resume != null && !resume.isEmpty()) {
+            if (resumeFile != null && !resumeFile.isEmpty()) {
                 try {
-                    resumeText = extractTextFromPDF(resume);
+                    resumeText = extractTextFromPDF(resumeFile);
                     model.addAttribute("resumeActive", true);
-                    model.addAttribute("resumeFileName", resume.getOriginalFilename());
+                    model.addAttribute("resumeFileName", resumeFile.getOriginalFilename());
+
                 } catch (Exception e) {
                     model.addAttribute("error", "Resume Parsing: " + e.getMessage());
                 }
@@ -98,14 +95,17 @@ public class HomeController {
 
             // TRY REAL SEARCH -> IF FAIL, USE MOCK DATA
             try {
-                fetchRealJobs(model, role, location, page, datePosted, resumeText);
-            } catch (Exception apiEx) {
-                System.err.println("API FAILED: " + apiEx.getMessage() + ". Generating high-quality mock data.");
-                generateMockJobs(model, role, location, resumeText);
-                model.addAttribute("error",
-                        "Job Network is currently limited. Showing simulated matches for demonstration.");
+                // Note: The original fetchRealJobs method expects 'page' and 'experience' which
+                // are no longer in search signature.
+                // Assuming 'page' defaults to 1 and 'experience' is not used in fetchRealJobs
+                // based on the diff.
+                fetchRealJobs(model, role, location, 1, datePosted, resumeText);
+            } catch (Exception e) {
+                // Fallback to Mock Data if API fails
+                System.out.println("API Error: " + e.getMessage() + ". Generating mock jobs.");
+                generateMockJobs(model, role, location, resumeText, datePosted);
+                model.addAttribute("error", "Network busy. Showing simulated results.");
             }
-
         } catch (Exception e) {
             e.printStackTrace();
             model.addAttribute("error", "System Reset: " + e.getMessage());
@@ -117,11 +117,17 @@ public class HomeController {
     private void fetchRealJobs(Model model, String role, String loc, int page, String date, String resumeText)
             throws Exception {
         String q = role.trim() + " in " + (loc != null ? loc.trim() : "Remote");
-        URI uri = UriComponentsBuilder.fromUriString("https://jsearch.p.rapidapi.com/search")
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString("https://jsearch.p.rapidapi.com/search")
                 .queryParam("query", q)
                 .queryParam("page", page)
-                .queryParam("num_pages", 1)
-                .build().encode().toUri();
+                .queryParam("num_pages", 1);
+
+        if (date != null && !date.equals("all")) {
+            builder.queryParam("date_posted", date);
+        }
+
+        URI uri = builder.build().encode().toUri();
 
         HttpHeaders h = new HttpHeaders();
         h.set("X-RapidAPI-Key", rapidApiKey);
@@ -157,12 +163,13 @@ public class HomeController {
         }
     }
 
-    private void generateMockJobs(Model model, String role, String loc, String resumeText) {
+    private void generateMockJobs(Model model, String role, String loc, String resumeText, String datePosted) {
         List<Map<String, Object>> jobs = new ArrayList<>();
+        String timeFrame = (datePosted != null) ? " (" + datePosted + ")" : "";
         String[] comps = { "Starlink", "OpenAI", "Nvidia", "Adobe", "Salesforce" };
         for (String c : comps) {
             Map<String, Object> j = new HashMap<>();
-            j.put("title", role + " (Simulated)");
+            j.put("title", role + " (Simulated)" + timeFrame);
             j.put("company", c);
             j.put("job_city", loc != null && !loc.isBlank() ? loc : "Global Remote");
             j.put("desc",
