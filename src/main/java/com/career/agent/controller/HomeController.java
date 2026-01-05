@@ -62,7 +62,7 @@ public class HomeController {
         return "redirect:/login?msg=Logged Out";
     }
 
-    @GetMapping("/search")
+    @RequestMapping(value = "/search", method = { RequestMethod.GET, RequestMethod.POST })
     public String search(@RequestParam(required = false) String role,
             @RequestParam(required = false) String location,
             @RequestParam(required = false) String datePosted,
