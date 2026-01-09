@@ -1,5 +1,6 @@
 package com.career.agent.controller;
 
+import jakarta.servlet.http.HttpSession;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,12 +11,13 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
+
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
+
 import java.io.IOException;
 import java.security.Principal;
 import java.util.*;
-import java.net.URI;
 
 @Controller
 public class HomeController {
@@ -26,24 +28,14 @@ public class HomeController {
     @Value("${groq.api.key}")
     private String groqApiKey;
 
-    private void addDefaultAttributes(Model model, Principal principal) {
-        model.addAttribute("authenticated", principal != null);
-        model.addAttribute("userEmail", (principal != null) ? principal.getName() : "");
-        model.addAttribute("jobs", new ArrayList<Map<String, Object>>());
-        model.addAttribute("currentPage", 1);
-        model.addAttribute("role", "");
-        model.addAttribute("location", "");
-        model.addAttribute("experience", "all");
-        model.addAttribute("datePosted", "all");
-        model.addAttribute("resumeActive", false);
-        model.addAttribute("resumeFileName", "");
-        model.addAttribute("error", null);
-    }
+    /* ================= COMMON ================= */
 
-    @GetMapping("/")
-    public String home(Model model, Principal principal) {
-        addDefaultAttributes(model, principal);
-        return "dashboard";
+    private void addDefaults(Model model, Principal principal) {
+        model.addAttribute("authenticated", principal != null);
+        model.addAttribute("userEmail", principal != null ? principal.getName() : "");
+        model.addAttribute("jobs", new ArrayList<>());
+        model.addAttribute("error", null);
+        model.addAttribute("currentPage", 1);
     }
 
     @GetMapping("/login")
@@ -51,6 +43,12 @@ public class HomeController {
         model.addAttribute("infoMsg", msg);
         model.addAttribute("authenticated", false);
         return "login";
+    }
+
+    @GetMapping("/")
+    public String home(Model model, Principal principal) {
+        addDefaults(model, principal);
+        return "dashboard";
     }
 
     @PostMapping("/logout")
@@ -62,131 +60,209 @@ public class HomeController {
         return "redirect:/login?msg=Logged Out";
     }
 
-    @RequestMapping(value = "/search", method = { RequestMethod.GET, RequestMethod.POST })
-    public String search(@RequestParam(required = false) String role,
+    /* ================= SEARCH ================= */
+
+    @RequestMapping(value = "/search", method = {RequestMethod.GET, RequestMethod.POST})
+    public String search(
+            @RequestParam String role,
             @RequestParam(required = false) String location,
             @RequestParam(required = false) String datePosted,
-            @RequestParam("resume") MultipartFile resumeFile,
-            Model model, Principal principal) {
+            @RequestParam(required = false) MultipartFile resume,
+            @RequestParam(defaultValue = "1") int page,
+            Model model,
+            Principal principal,
+            HttpSession session) {
+
+        addDefaults(model, principal);
+
+        if (principal == null) {
+            return "redirect:/login?msg=Please sign in first";
+        }
+
+        if (role == null || role.isBlank()) {
+            model.addAttribute("error", "Please enter a job title.");
+            return "dashboard";
+        }
+
+        // 🔴 RESET session only on FIRST PAGE
+        if (page == 1) {
+            session.removeAttribute("jobCache");
+        }
+
+        List<Map<String, Object>> allJobs =
+                (List<Map<String, Object>>) session.getAttribute("jobCache");
+
+        if (allJobs == null) {
+            allJobs = new ArrayList<>();
+        }
 
         try {
-            addDefaultAttributes(model, principal);
-            if (principal == null)
-                return "redirect:/login?msg=Please sign in first";
+            List<Map<String, Object>> newJobs =
+                    fetchJSearchUntilFound(role, location, datePosted, "", page);
 
-            model.addAttribute("role", role);
-            model.addAttribute("location", location);
-            model.addAttribute("datePosted", (datePosted != null) ? datePosted : "all");
+            // ✅ APPEND instead of overwrite
+            allJobs.addAll(newJobs);
+            session.setAttribute("jobCache", allJobs);
 
-            if (role == null || role.isBlank())
-                return "dashboard";
+            model.addAttribute("jobs", allJobs);
+            model.addAttribute("currentPage", page);
 
-            String resumeText = "";
-            if (resumeFile != null && !resumeFile.isEmpty()) {
-                try {
-                    resumeText = extractTextFromPDF(resumeFile);
-                    model.addAttribute("resumeActive", true);
-                    model.addAttribute("resumeFileName", resumeFile.getOriginalFilename());
-
-                } catch (Exception e) {
-                    model.addAttribute("error", "Resume Parsing: " + e.getMessage());
-                }
-            }
-
-            // TRY REAL SEARCH -> IF FAIL, USE MOCK DATA
-            try {
-                // Note: The original fetchRealJobs method expects 'page' and 'experience' which
-                // are no longer in search signature.
-                // Assuming 'page' defaults to 1 and 'experience' is not used in fetchRealJobs
-                // based on the diff.
-                fetchRealJobs(model, role, location, 1, datePosted, resumeText);
-            } catch (Exception e) {
-                // Fallback to Mock Data if API fails
-                System.out.println("API Error: " + e.getMessage() + ". Generating mock jobs.");
-                generateMockJobs(model, role, location, resumeText, datePosted);
-                model.addAttribute("error", "Network busy. Showing simulated results.");
-            }
         } catch (Exception e) {
-            e.printStackTrace();
-            model.addAttribute("error", "System Reset: " + e.getMessage());
+
+            List<Map<String, Object>> fallback =
+                    fetchRemotivePaged(role, page);
+
+            allJobs.addAll(fallback);
+            session.setAttribute("jobCache", allJobs);
+
+            model.addAttribute("jobs", allJobs);
+            model.addAttribute("error",
+                    "Primary source busy. Showing additional results.");
         }
+
         return "dashboard";
     }
 
+
+    /* ================= LOAD MORE (AJAX) ================= */
+
+    @GetMapping("/api/load-more")
+    @ResponseBody
+    public List<Map<String, Object>> loadMore(
+            @RequestParam String role,
+            @RequestParam(required = false) String location,
+            @RequestParam(defaultValue = "1") int page) {
+
+        try {
+            return fetchJSearchUntilFound(role, location, null, "", page);
+        } catch (Exception e) {
+            return fetchRemotivePaged(role, page);
+        }
+    }
+
+    /* ================= JSEARCH LOGIC ================= */
+
+    private List<Map<String, Object>> fetchJSearchUntilFound(
+            String role,
+            String location,
+            String date,
+            String resumeText,
+            int startPage) {
+
+        int MAX_PAGES = 5; // safety limit
+
+        for (int p = startPage; p <= MAX_PAGES; p++) {
+            List<Map<String, Object>> jobs =
+                    fetchJSearchJobs(role, location, date, resumeText, p);
+
+            if (!jobs.isEmpty()) {
+                return jobs;
+            }
+        }
+        return Collections.emptyList();
+    }
+
     @SuppressWarnings("unchecked")
-    private void fetchRealJobs(Model model, String role, String loc, int page, String date, String resumeText)
-            throws Exception {
-        String q = role.trim() + " in " + (loc != null ? loc.trim() : "Remote");
+    private List<Map<String, Object>> fetchJSearchJobs(
+            String role,
+            String location,
+            String date,
+            String resumeText,
+            int page) {
 
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString("https://jsearch.p.rapidapi.com/search")
-                .queryParam("query", q)
-                .queryParam("page", page)
-                .queryParam("num_pages", 1);
+        String query = role + " " +
+                (location != null && !location.isBlank() ? location : "India");
 
-        if (date != null && !date.equals("all")) {
+        UriComponentsBuilder builder =
+                UriComponentsBuilder.fromUriString("https://jsearch.p.rapidapi.com/search")
+                        .queryParam("query", query)
+                        .queryParam("page", page)
+                        .queryParam("num_pages", 1);
+
+        if (date != null && !"all".equals(date)) {
             builder.queryParam("date_posted", date);
         }
 
-        URI uri = builder.build().encode().toUri();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-RapidAPI-Key", rapidApiKey);
+        headers.set("X-RapidAPI-Host", "jsearch.p.rapidapi.com");
 
-        HttpHeaders h = new HttpHeaders();
-        h.set("X-RapidAPI-Key", rapidApiKey);
-        h.set("X-RapidAPI-Host", "jsearch.p.rapidapi.com");
+        ResponseEntity<Map> response =
+                new RestTemplate().exchange(
+                        builder.build().encode().toUri(),
+                        HttpMethod.GET,
+                        new HttpEntity<>(headers),
+                        Map.class
+                );
 
-        ResponseEntity<Map> resp = new RestTemplate().exchange(uri, HttpMethod.GET, new HttpEntity<>(h), Map.class);
-        if (resp.getBody() != null && resp.getBody().get("data") instanceof List) {
-            List<Map<String, Object>> raw = (List<Map<String, Object>>) resp.getBody().get("data");
-            List<Map<String, Object>> jobs = new ArrayList<>();
-            for (Map<String, Object> r : raw) {
-                Map<String, Object> j = new HashMap<>();
-                String comp = Objects.toString(r.get("employer_name"), "Top Tech Corp");
-                if (comp.trim().isEmpty())
-                    comp = "Hiring Agency";
-
-                j.put("title", Objects.toString(r.get("job_title"), "Professional Role"));
-                j.put("company", comp);
-                j.put("job_city", Objects.toString(r.get("job_city"), "Remote"));
-                String d = Objects.toString(r.get("job_description"), "");
-                j.put("desc", d.length() > 240 ? d.substring(0, 240) + "..." : d);
-                j.put("url", Objects.toString(r.get("job_apply_link"), "#"));
-                j.put("logo", (r.get("employer_logo") != null) ? r.get("employer_logo").toString()
-                        : "https://via.placeholder.com/64?text=" + comp.substring(0, 1).toUpperCase());
-
-                int score = calculateScore(resumeText, j.get("title").toString(), d);
-                j.put("score", score);
-                j.put("reason", score > 60 ? "Great technical match for your career." : "Location/Role match found.");
-                jobs.add(j);
-            }
-            if (!resumeText.isEmpty())
-                jobs.sort((a, b) -> Integer.compare((int) b.get("score"), (int) a.get("score")));
-            if (jobs.isEmpty()) {
-                generateMockJobs(model, role, loc, resumeText, date);
-            } else {
-                model.addAttribute("jobs", jobs);
-            }
+        Map body = response.getBody();
+        if (body == null || !body.containsKey("data")) {
+            return Collections.emptyList();
         }
-    }
 
-    private void generateMockJobs(Model model, String role, String loc, String resumeText, String datePosted) {
+        List<Map<String, Object>> raw = (List<Map<String, Object>>) body.get("data");
         List<Map<String, Object>> jobs = new ArrayList<>();
-        String timeFrame = (datePosted != null) ? " (" + datePosted + ")" : "";
-        String[] comps = { "Starlink", "OpenAI", "Nvidia", "Adobe", "Salesforce" };
-        for (String c : comps) {
+
+        for (Map r : raw) {
             Map<String, Object> j = new HashMap<>();
-            j.put("title", role + " (Simulated)" + timeFrame);
-            j.put("company", c);
-            j.put("job_city", loc != null && !loc.isBlank() ? loc : "Global Remote");
-            j.put("desc",
-                    "This is an AI-generated match for your search. The live job network is currently under high load, but we can still analyze your profile against this criteria.");
-            j.put("url", "https://google.com/search?q=" + role + "+jobs");
-            j.put("logo", "https://via.placeholder.com/64?text=" + c.charAt(0));
-            int score = calculateScore(resumeText, role, "");
-            j.put("score", score);
-            j.put("reason", "Simulated match for professional benchmarking.");
+            j.put("title", r.get("job_title"));
+            j.put("company", r.get("employer_name"));
+            j.put("job_city", r.get("job_city"));
+
+            String desc = stripHtml(Objects.toString(r.get("job_description"), ""));
+            j.put("desc", desc.length() > 240 ? desc.substring(0, 240) + "..." : desc);
+
+            j.put("url", r.get("job_apply_link"));
+            j.put("logo", r.get("employer_logo"));
+            j.put("score", 60);
+            j.put("reason", "Live job from JSearch");
+
             jobs.add(j);
         }
-        model.addAttribute("jobs", jobs);
+        return jobs;
     }
+
+    /* ================= REMOTIVE (PAGED) ================= */
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> fetchRemotivePaged(String role, int page) {
+
+        String url = "https://remotive.com/api/remote-jobs?search=" + role;
+        Map<String, Object> resp = new RestTemplate().getForObject(url, Map.class);
+
+        if (resp == null || !resp.containsKey("jobs")) return Collections.emptyList();
+
+        List<Map<String, Object>> all =
+                (List<Map<String, Object>>) resp.get("jobs");
+
+        int pageSize = 10;
+        int from = (page - 1) * pageSize;
+        int to = Math.min(from + pageSize, all.size());
+
+        if (from >= all.size()) return Collections.emptyList();
+
+        List<Map<String, Object>> jobs = new ArrayList<>();
+
+        for (Map r : all.subList(from, to)) {
+            Map<String, Object> j = new HashMap<>();
+            j.put("title", r.get("title"));
+            j.put("company", r.get("company_name"));
+            j.put("job_city", "Remote");
+
+            String desc = stripHtml(Objects.toString(r.get("description"), ""));
+            j.put("desc", desc.length() > 240 ? desc.substring(0, 240) + "..." : desc);
+
+            j.put("url", r.get("url"));
+            j.put("logo", r.get("company_logo"));
+            j.put("score", 50);
+            j.put("reason", "Live remote job (Remotive)");
+
+            jobs.add(j);
+        }
+        return jobs;
+    }
+
+    /* ================= HELPERS ================= */
 
     private String extractTextFromPDF(MultipartFile file) throws IOException {
         try (PDDocument doc = PDDocument.load(file.getInputStream())) {
@@ -194,31 +270,11 @@ public class HomeController {
         }
     }
 
-    private int calculateScore(String res, String tit, String desc) {
-        if (res == null || res.isEmpty())
-            return 40;
-        int s = 45;
-        String[] kws = { "java", "node", "python", "react", "aws", "docker", "sql" };
-        for (String k : kws)
-            if (res.toLowerCase().contains(k))
-                s += 10;
-        return Math.min(s, 100);
-    }
-
-    @PostMapping("/api/chat")
-    @ResponseBody
-    public Map<String, String> chat(@RequestBody Map<String, String> body) {
-        try {
-            HttpHeaders h = new HttpHeaders();
-            h.set("Authorization", "Bearer " + groqApiKey);
-            Map<String, Object> r = Map.of("model", "llama-3.3-70b-versatile", "messages",
-                    List.of(Map.of("role", "user", "content", body.get("message"))));
-            ResponseEntity<Map> rs = new RestTemplate().postForEntity("https://api.groq.com/openai/v1/chat/completions",
-                    new HttpEntity<>(r, h), Map.class);
-            return Map.of("reply",
-                    (String) ((Map) ((Map) ((List) rs.getBody().get("choices")).get(0)).get("message")).get("content"));
-        } catch (Exception e) {
-            return Map.of("reply", "AI Busy.");
-        }
+    private String stripHtml(String html) {
+        if (html == null) return "";
+        return html.replaceAll("<[^>]*>", "")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }
+

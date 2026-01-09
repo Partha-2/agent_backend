@@ -272,7 +272,7 @@
         <div class="search-container shadow-2xl">
             <form id="searchForm" action="/search" method="post" enctype="multipart/form-data" class="row g-4"
                 onsubmit="showSearchLoader()">
-                <input type="hidden" name="page" id="pageInput" th:value="${currentPage}">
+                <input type="hidden" name="page" id="pageInput" th:value="${currentPage != null ? currentPage : 1}">
 
                 <div class="col-md-4">
                     <label class="small fw-bold text-secondary mb-2 uppercase">Job Title</label>
@@ -350,7 +350,7 @@
             <!-- Empty State -->
             <div th:if="${#lists.isEmpty(jobs)}" class="col-12 text-center py-5">
                 <div class="opacity-10 mb-4"><i class="fas fa-briefcase fa-5x"></i></div>
-                <h4 class="text-secondary">No listings active currently for this search.</h4>
+                <h4 class="text-white">No listings active currently for this search.</h4>
                 <p class="text-muted">Try a broader title like "Developer" or "Engineer".</p>
             </div>
 
@@ -359,11 +359,13 @@
                 <div class="card p-4">
                     <div class="row align-items-center">
                         <div class="col-md-auto col-12 text-center mb-md-0 mb-3">
-                            <img th:src="${job.logo}" class="job-logo shadow-sm"
-                                onerror="this.src='/img/job-placeholder.png'">
+							<img th:src="${job.logo != null && !job.logo.isEmpty() ? job.logo : '/img/job-placeholder.png'}"
+							     class="job-logo shadow-sm"
+							     onerror="this.onerror=null;this.src='/img/job-placeholder.png';">
+
                         </div>
                         <div class="col">
-                            <h5 class="fw-bold mb-1" th:text="${job.title}"></h5>
+                            <h5 class="fw-bold mb-1 text-white" th:text="${job.title}"></h5>
                             <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
                                 <span class="text-primary fw-600 small"><i class="fas fa-building me-1"></i> <span
                                         th:text="${job.company}"></span></span>
@@ -429,7 +431,8 @@
     <!-- Saved Jobs Drawer -->
     <div class="offcanvas offcanvas-end" id="savedJobsDrawer">
         <div class="offcanvas-header border-bottom border-secondary">
-            <h5 class="fw-bold mb-0"><i class="fas fa-bookmark text-primary me-2"></i> Saved Opportunities</h5>
+            <h5 class="fw-bold mb-0 text-white"><i class="fas fa-bookmark text-primary me-2"></i> Saved Opportunities
+            </h5>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
         </div>
         <div class="offcanvas-body" id="savedJobsBody">
