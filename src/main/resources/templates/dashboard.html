@@ -396,15 +396,27 @@
             </div>
 
             <!-- Pagination -->
-            <div th:if="${!#lists.isEmpty(jobs)}" class="col-12 text-center mt-5">
-                <div class="d-flex justify-content-center gap-2">
-                    <button class="btn btn-outline-secondary rounded-pill px-4" th:if="${currentPage > 1}"
-                        onclick="changePage(-1)">Previous</button>
-                    <button class="btn btn-outline-primary rounded-pill px-4" onclick="changePage(1)">Load More</button>
-                </div>
-            </div>
-        </div>
-    </div>
+			<div th:if="${!#lists.isEmpty(jobs)}" class="col-12 text-center mt-5">
+			    <div class="d-flex justify-content-center gap-2">
+
+			        <a th:if="${currentPage > 1}"
+			           th:href="@{/search(role=${param.role}, location=${param.location}, page=${currentPage - 1})}"
+			           class="btn btn-outline-secondary rounded-pill px-4">
+			            Previous
+			        </a>
+
+			        <span class="btn btn-outline-light disabled rounded-pill px-4">
+			            Page <span th:text="${currentPage}"></span>
+			        </span>
+
+			        <a th:href="@{/search(role=${param.role}, location=${param.location}, page=${currentPage + 1})}"
+			           class="btn btn-outline-primary rounded-pill px-4">
+			            Next
+			        </a>
+
+			    </div>
+			</div>
+
 
     <!-- Chat -->
     <div class="chat-trigger" onclick="toggleChat()"><i class="fas fa-comment-dots"></i></div>
@@ -447,12 +459,7 @@
             w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
         }
 
-        function changePage(delta) {
-            const current = parseInt(document.getElementById('pageInput').value);
-            document.getElementById('pageInput').value = current + delta;
-            document.getElementById('searchLoader').style.display = 'flex';
-            document.getElementById('searchForm').submit();
-        }
+    
 
         function logout() {
             // Delete Local Storage
@@ -601,7 +608,72 @@
         document.getElementById("chatInput").addEventListener("keypress", (e) => {
             if (e.key === 'Enter') sendMessage();
         });
+		
+
+		
     </script>
+	
+	
+	<script>
+	document.addEventListener("DOMContentLoaded", () => {
+
+	    let page = /*[[${currentPage}]]*/ 1;
+	    const role = /*[[${param.role}]]*/ '';
+	    const jobLocation = /*[[${param.location}]]*/ '';
+
+	    const loadMoreBtn = document.getElementById("loadMoreBtn");
+	    const jobsGrid = document.querySelector(".row.g-4.mt-5.pb-5");
+
+	    if (!loadMoreBtn || !jobsGrid) return;
+
+	    loadMoreBtn.addEventListener("click", () => {
+	        console.log("LOAD MORE CLICKED");
+	        page++;
+
+	        loadMoreBtn.disabled = true;
+	        loadMoreBtn.innerText = "Loading...";
+
+	        fetch(`/api/load-more?role=${encodeURIComponent(role)}&location=${encodeURIComponent(jobLocation)}&page=${page}`)
+	            .then(res => res.json())
+	            .then(data => {
+	                if (!data || data.length === 0) {
+	                    loadMoreBtn.innerText = "No More Jobs";
+	                    return;
+	                }
+
+	                data.forEach(job => {
+	                    const col = document.createElement("div");
+	                    col.className = "col-12";
+	                    col.innerHTML = `
+	                        <div class="card p-4">
+	                            <h5 class="fw-bold text-white">${job.title}</h5>
+	                            <div class="text-secondary small mb-2">
+	                                ${job.company} • ${job.job_city}
+	                            </div>
+	                            <p class="text-secondary small">${job.desc}</p>
+	                            <a href="${job.url}" target="_blank"
+	                               class="btn btn-sm btn-primary rounded-pill mt-2">
+	                               Apply Now
+	                            </a>
+	                        </div>
+	                    `;
+	                    jobsGrid.appendChild(col);
+	                });
+
+	                loadMoreBtn.disabled = false;
+	                loadMoreBtn.innerText = "Load More";
+	            })
+	            .catch(err => {
+	                console.error("LOAD MORE ERROR:", err);
+	                loadMoreBtn.innerText = "Retry";
+	                loadMoreBtn.disabled = false;
+	            });
+	    });
+	});
+	</script>
+
+
+
 </body>
 
 </html>
